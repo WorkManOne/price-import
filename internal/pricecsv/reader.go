@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
+
+	"github.com/WorkManOne/price-import/internal/money"
 )
 
 const DefaultMaxRows = 100_000
@@ -17,12 +20,18 @@ type Options struct {
 	MaxRows   int  // 0 - DefaultMaxRows
 }
 
-// Row одна строка прайса после разбора
+// Row одна строка прайса после разбора.
+// nil в полях = такой колонки в файле нет, значит это поле не трогаем
 type Row struct {
-	Line   int      `json:"line"` // номер строки в файле, заголовок это строка 1
-	Raw    []string `json:"raw,omitempty"`
-	SKU    string   `json:"sku"`
-	Errors []string `json:"errors,omitempty"`
+	Line     int            `json:"line"` // номер строки в файле, заголовок это строка 1
+	Raw      []string       `json:"raw,omitempty"`
+	SKU      string         `json:"sku"`
+	Name     *string        `json:"name,omitempty"`
+	Category *string        `json:"category,omitempty"`
+	Price    *money.Kopecks `json:"price,omitempty"`
+	Stock    *int64         `json:"stock,omitempty"`
+	Errors   []string       `json:"errors,omitempty"`
+	Warnings []string       `json:"warnings,omitempty"`
 }
 
 func (r *Row) Valid() bool { return len(r.Errors) == 0 }
@@ -53,7 +62,7 @@ func Parse(r io.Reader, opt Options) (*File, error) {
 	if opt.MaxRows <= 0 {
 		opt.MaxRows = DefaultMaxRows
 	}
-	text := strings.TrimPrefix(string(data), "\uFEFF") // BOM от экселя
+	text := strings.TrimPrefix(string(data), "\xef\xbb\xbf") // BOM от экселя
 
 	delim := opt.Delimiter
 	if delim == 0 {
@@ -102,6 +111,7 @@ func Parse(r io.Reader, opt Options) (*File, error) {
 		line, _ := cr.FieldPos(0)
 		f.Rows = append(f.Rows, f.parseRow(line, rec))
 	}
+	markDuplicates(f.Rows)
 	return f, nil
 }
 
@@ -123,11 +133,87 @@ func (f *File) parseRow(line int, rec []string) Row {
 		row.addErr("в строке %d значений, а в заголовке %d колонок", len(rec), len(f.Header))
 		return row
 	}
-	row.SKU = strings.ToUpper(strings.TrimSpace(rec[f.hm.idx[ColSKU]]))
-	if row.SKU == "" {
-		row.addErr("пустой артикул")
+	get := func(c Column) (string, bool) {
+		i, ok := f.hm.idx[c]
+		if !ok {
+			return "", false
+		}
+		return rec[i], true
+	}
+
+	sku, _ := get(ColSKU)
+	row.SKU = normSKU(sku)
+	if err := checkSKU(row.SKU); err != "" {
+		row.addErr("%s", err)
+	}
+	if v, ok := get(ColName); ok {
+		n := normText(v)
+		switch {
+		case n == "":
+			row.addErr("пустое наименование")
+		case runeLen(n) > MaxTextLen:
+			row.addErr("наименование длиннее %d символов", MaxTextLen)
+		case hasControl(n):
+			row.addErr("в наименовании непечатные символы")
+		default:
+			row.Name = &n
+		}
+	}
+	if v, ok := get(ColCategory); ok {
+		// пустая категория это нормально = без категории
+		c := normText(v)
+		switch {
+		case runeLen(c) > MaxTextLen:
+			row.addErr("категория длиннее %d символов", MaxTextLen)
+		case hasControl(c):
+			row.addErr("в категории непечатные символы")
+		default:
+			row.Category = &c
+		}
+	}
+	if v, ok := get(ColPrice); ok {
+		p, err := money.Parse(v)
+		if err != nil {
+			row.addErr("цена %q: %v", strings.TrimSpace(v), err)
+		} else {
+			row.Price = &p
+			if p == 0 {
+				row.Warnings = append(row.Warnings, "нулевая цена")
+			}
+		}
+	}
+	if v, ok := get(ColStock); ok {
+		s, err := parseStock(v)
+		if err != "" {
+			row.addErr("остаток %q: %s", strings.TrimSpace(v), err)
+		} else {
+			row.Stock = &s
+		}
 	}
 	return row
+}
+
+// markDuplicates - один артикул в файле дважды. какая строка правильная мы не знаем,
+// поэтому бракуем все вхождения, пусть человек сам разберется
+func markDuplicates(rows []Row) {
+	lines := map[string][]int{}
+	for _, r := range rows {
+		if r.SKU != "" {
+			lines[r.SKU] = append(lines[r.SKU], r.Line)
+		}
+	}
+	for i := range rows {
+		ls := lines[rows[i].SKU]
+		if len(ls) < 2 {
+			continue
+		}
+		sort.Ints(ls)
+		parts := make([]string, len(ls))
+		for j, l := range ls {
+			parts[j] = fmt.Sprint(l)
+		}
+		rows[i].addErr("артикул %s повторяется в файле (строки %s)", rows[i].SKU, strings.Join(parts, ", "))
+	}
 }
 
 func allEmpty(rec []string) bool {
