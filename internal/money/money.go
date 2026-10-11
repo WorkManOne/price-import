@@ -31,7 +31,7 @@ var (
 func Parse(s string) (Kopecks, error) {
 	s = strings.TrimSpace(s)
 	// excel любит вставлять nbsp и узкий nbsp между тысячами
-	s = strings.NewReplacer(" ", "", " ", "", " ", "").Replace(s)
+	s = strings.NewReplacer(" ", "", "\u00a0", "", "\u202f", "").Replace(s)
 	if s == "" {
 		return 0, ErrEmpty
 	}
