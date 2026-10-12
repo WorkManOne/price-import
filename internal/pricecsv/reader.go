@@ -16,8 +16,9 @@ import (
 const DefaultMaxRows = 100_000
 
 type Options struct {
-	Delimiter rune // 0 - угадать по заголовку
-	MaxRows   int  // 0 - DefaultMaxRows
+	Encoding  string // auto, utf-8, cp1251
+	Delimiter rune   // 0 - угадать по заголовку
+	MaxRows   int    // 0 - DefaultMaxRows
 }
 
 // Row одна строка прайса после разбора.
@@ -41,6 +42,7 @@ func (r *Row) addErr(format string, args ...any) {
 }
 
 type File struct {
+	Encoding  string // какую кодировку в итоге взяли
 	Delimiter rune
 	Header    []string
 	Columns   []Column // что распознали, в порядке файла
@@ -62,7 +64,11 @@ func Parse(r io.Reader, opt Options) (*File, error) {
 	if opt.MaxRows <= 0 {
 		opt.MaxRows = DefaultMaxRows
 	}
-	text := strings.TrimPrefix(string(data), "\xef\xbb\xbf") // BOM от экселя
+	text, enc, err := decode(data, opt.Encoding)
+	if err != nil {
+		return nil, err
+	}
+	text = strings.TrimPrefix(text, "\xef\xbb\xbf") // BOM от экселя
 
 	delim := opt.Delimiter
 	if delim == 0 {
@@ -84,7 +90,7 @@ func Parse(r io.Reader, opt Options) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	f := &File{Delimiter: delim, Header: header, Columns: hm.order, Ignored: hm.ignored, hm: hm}
+	f := &File{Encoding: enc, Delimiter: delim, Header: header, Columns: hm.order, Ignored: hm.ignored, hm: hm}
 
 	for {
 		rec, err := cr.Read()
