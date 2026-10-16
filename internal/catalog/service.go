@@ -3,6 +3,7 @@
 package catalog
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -69,3 +70,5 @@ func delimName(r rune) string {
 	}
 	return string(r)
 }
+
+func (s *Service) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
