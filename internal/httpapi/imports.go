@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"mime"
@@ -182,4 +183,44 @@ func toItemDTO(it diff.Item) itemDTO {
 		Old: toStateDTO(it.Old), New: toStateDTO(it.New),
 		Changes: it.Changes, Errors: it.Errors, Warnings: it.Warnings, Raw: it.Raw,
 	}
+}
+
+// applyImport - подтверждение. в теле reportHash из отчета (= "я видел вот этот отчет")
+// и skipInvalid если в отчете есть битые строки
+func (a *API) applyImport(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req catalog.ApplyRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_json", "нужен json {\"reportHash\": \"...\", \"skipInvalid\": false}", nil)
+		return
+	}
+	if req.ReportHash == "" {
+		writeError(w, http.StatusBadRequest, "no_report_hash", "reportHash обязателен - это подтверждение что отчет просмотрен", nil)
+		return
+	}
+	res, err := a.svc.Apply(r.Context(), id, req)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (a *API) cancelImport(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	imp, err := a.svc.Cancel(r.Context(), id)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, imp)
 }

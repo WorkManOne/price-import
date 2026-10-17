@@ -130,3 +130,70 @@ func TestNotFoundAndBadParams(t *testing.T) {
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }
+
+func upload(t *testing.T, srv *httptest.Server, csv string) map[string]any {
+	t.Helper()
+	code, m := do(t, "POST", srv.URL+"/api/v1/imports", "text/csv", strings.NewReader(csv))
+	if code != 201 {
+		t.Fatal(code, m)
+	}
+	return m
+}
+
+func applyBody(hash string, skip bool) io.Reader {
+	b, _ := json.Marshal(map[string]any{"reportHash": hash, "skipInvalid": skip})
+	return bytes.NewReader(b)
+}
+
+func TestApplyFlow(t *testing.T) {
+	srv := newServer(t)
+	m := upload(t, srv, "sku,name,price\nA-1,Чайник,10\nA-2,,5\n")
+	id := itoa(int(m["id"].(float64)))
+	hash := m["reportHash"].(string)
+	u := srv.URL + "/api/v1/imports/" + id + "/apply"
+
+	if code, m := do(t, "POST", u, "application/json", strings.NewReader(`{}`)); code != 400 || errCode(m) != "no_report_hash" {
+		t.Fatal(code, m)
+	}
+	if code, m := do(t, "POST", u, "application/json", applyBody("nope", false)); code != 409 || errCode(m) != "report_hash_mismatch" {
+		t.Fatal(code, m)
+	}
+	if code, m := do(t, "POST", u, "application/json", applyBody(hash, false)); code != 422 || errCode(m) != "invalid_rows_not_confirmed" {
+		t.Fatal(code, m)
+	}
+	code, res := do(t, "POST", u, "application/json", applyBody(hash, true))
+	if code != 200 || res["created"].(float64) != 1 || res["alreadyApplied"] != false {
+		t.Fatal(code, res)
+	}
+	code, res = do(t, "POST", u, "application/json", applyBody(hash, true))
+	if code != 200 || res["alreadyApplied"] != true {
+		t.Fatal(code, res)
+	}
+	if code, m := do(t, "POST", srv.URL+"/api/v1/imports/"+id+"/cancel", "", nil); code != 409 || errCode(m) != "bad_status" {
+		t.Fatal(code, m)
+	}
+}
+
+func TestApplyStaleIs409(t *testing.T) {
+	srv := newServer(t)
+	upl := func(csv string) (string, string) {
+		m := upload(t, srv, csv)
+		return itoa(int(m["id"].(float64))), m["reportHash"].(string)
+	}
+	id0, h0 := upl("sku,name,price\nA-1,Чайник,10\n")
+	do(t, "POST", srv.URL+"/api/v1/imports/"+id0+"/apply", "application/json", applyBody(h0, false))
+
+	id1, h1 := upl("sku,price\nA-1,20\n")
+	id2, h2 := upl("sku,price\nA-1,30\n")
+	if code, _ := do(t, "POST", srv.URL+"/api/v1/imports/"+id1+"/apply", "application/json", applyBody(h1, false)); code != 200 {
+		t.Fatal(code)
+	}
+	code, m := do(t, "POST", srv.URL+"/api/v1/imports/"+id2+"/apply", "application/json", applyBody(h2, false))
+	if code != 409 || errCode(m) != "import_stale" {
+		t.Fatal(code, m)
+	}
+	conf := m["error"].(map[string]any)["details"].(map[string]any)["conflicts"].([]any)
+	if len(conf) != 1 || conf[0].(map[string]any)["sku"] != "A-1" {
+		t.Fatal(conf)
+	}
+}

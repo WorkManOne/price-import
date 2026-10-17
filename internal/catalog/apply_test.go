@@ -189,3 +189,26 @@ func TestFullModeStaleOnNewActiveProduct(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCancel(t *testing.T) {
+	s, pool := newSvc(t)
+	seed(t, pool, []any{"A-1", "Чайник", "", 10000, 5})
+	imp := analyze(t, s, "sku,price\nA-1,200\n", diff.ModePartial)
+	got, err := s.Cancel(ctx, imp.ID)
+	if err != nil || got.Status != StatusCanceled || got.CanceledAt == nil {
+		t.Fatal(got, err)
+	}
+	if _, err := s.Cancel(ctx, imp.ID); err != nil {
+		t.Fatal("повторная отмена должна быть ок", err)
+	}
+	var se *StateError
+	if _, err := s.Apply(ctx, imp.ID, ApplyRequest{ReportHash: imp.ReportHash}); !errors.As(err, &se) {
+		t.Fatal(err)
+	}
+	// и наоборот - примененный не отменить
+	b := analyze(t, s, "sku,price\nA-1,300\n", diff.ModePartial)
+	apply(t, s, b, false)
+	if _, err := s.Cancel(ctx, b.ID); !errors.As(err, &se) {
+		t.Fatal(err)
+	}
+}

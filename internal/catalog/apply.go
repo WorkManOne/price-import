@@ -285,3 +285,31 @@ func updateProducts(ctx context.Context, tx pgx.Tx, items []diff.Item) error {
 	}
 	return nil
 }
+
+// Cancel - отказались от импорта. применить его потом уже нельзя
+func (s *Service) Cancel(ctx context.Context, id int64) (*Import, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	// FOR UPDATE - чтобы не разминуться с параллельным Apply: кто первый взял строку, тот и прав
+	imp, err := scanImport(tx.QueryRow(ctx, `SELECT `+importCols+` FROM imports WHERE id = $1 FOR UPDATE`, id))
+	if err != nil {
+		return nil, err
+	}
+	switch imp.Status {
+	case StatusCanceled:
+		return imp, nil
+	case StatusAnalyzed:
+	default:
+		return nil, &StateError{Status: imp.Status, Action: "отменить"}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE imports SET status = 'canceled', canceled_at = now() WHERE id = $1`, id); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.GetImport(ctx, id)
+}
