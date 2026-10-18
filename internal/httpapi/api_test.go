@@ -197,3 +197,34 @@ func TestApplyStaleIs409(t *testing.T) {
 		t.Fatal(conf)
 	}
 }
+
+func TestProductsAPI(t *testing.T) {
+	srv := newServer(t)
+	m := upload(t, srv, "sku,name,price\nA-1,Чайник,10\n")
+	do(t, "POST", srv.URL+"/api/v1/imports/"+itoa(int(m["id"].(float64)))+"/apply", "application/json", applyBody(m["reportHash"].(string), false))
+
+	code, p := do(t, "GET", srv.URL+"/api/v1/products/a-1", "", nil)
+	if code != 200 || p["price"] != "10.00" || p["version"].(float64) != 1 {
+		t.Fatal(code, p)
+	}
+	// цена числом - разбирается из текста, без float
+	code, p = do(t, "PATCH", srv.URL+"/api/v1/products/A-1", "application/json", strings.NewReader(`{"version":1,"price":19.99}`))
+	if code != 200 || p["price"] != "19.99" || p["version"].(float64) != 2 {
+		t.Fatal(code, p)
+	}
+	code, p = do(t, "PATCH", srv.URL+"/api/v1/products/A-1", "application/json", strings.NewReader(`{"version":1,"price":"5"}`))
+	if code != 409 || errCode(p) != "version_conflict" {
+		t.Fatal(code, p)
+	}
+	code, p = do(t, "PATCH", srv.URL+"/api/v1/products/A-1", "application/json", strings.NewReader(`{"version":2,"price":"5.555"}`))
+	if code != 400 || errCode(p) != "bad_price" {
+		t.Fatal(code, p)
+	}
+	code, p = do(t, "GET", srv.URL+"/api/v1/products?q=чай", "", nil)
+	if code != 200 || p["total"].(float64) != 1 {
+		t.Fatal(code, p)
+	}
+	if code, _ := do(t, "GET", srv.URL+"/api/v1/products/NOPE", "", nil); code != 404 {
+		t.Fatal(code)
+	}
+}

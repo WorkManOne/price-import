@@ -15,12 +15,12 @@ const (
 
 // артикулы приводим к верхнему регистру: "ab-1" и "AB-1" это один товар,
 // иначе в каталоге заведутся дубли из-за того что кто-то нажал капслок
-func normSKU(s string) string {
+func NormSKU(s string) string {
 	return strings.ToUpper(strings.TrimSpace(s))
 }
 
-// checkSKU возвращает текст ошибки или ""
-func checkSKU(s string) string {
+// CheckSKU возвращает текст ошибки или ""
+func CheckSKU(s string) string {
 	if s == "" {
 		return "пустой артикул"
 	}
@@ -36,9 +36,9 @@ func checkSKU(s string) string {
 	return ""
 }
 
-// normText убирает лишние пробелы, переносы и тд.
+// NormText убирает лишние пробелы, переносы и тд.
 // без этого "Чайник  синий" и "Чайник синий" будут считаться изменением
-func normText(s string) string {
+func NormText(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 

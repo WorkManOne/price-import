@@ -148,12 +148,12 @@ func (f *File) parseRow(line int, rec []string) Row {
 	}
 
 	sku, _ := get(ColSKU)
-	row.SKU = normSKU(sku)
-	if err := checkSKU(row.SKU); err != "" {
+	row.SKU = NormSKU(sku)
+	if err := CheckSKU(row.SKU); err != "" {
 		row.addErr("%s", err)
 	}
 	if v, ok := get(ColName); ok {
-		n := normText(v)
+		n := NormText(v)
 		switch {
 		case n == "":
 			row.addErr("пустое наименование")
@@ -167,7 +167,7 @@ func (f *File) parseRow(line int, rec []string) Row {
 	}
 	if v, ok := get(ColCategory); ok {
 		// пустая категория это нормально = без категории
-		c := normText(v)
+		c := NormText(v)
 		switch {
 		case runeLen(c) > MaxTextLen:
 			row.addErr("категория длиннее %d символов", MaxTextLen)

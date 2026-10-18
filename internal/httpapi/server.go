@@ -35,6 +35,10 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/imports/{id}/apply", a.applyImport)
 	mux.HandleFunc("POST /api/v1/imports/{id}/cancel", a.cancelImport)
 
+	mux.HandleFunc("GET /api/v1/products", a.listProducts)
+	mux.HandleFunc("GET /api/v1/products/{sku}", a.getProduct)
+	mux.HandleFunc("PATCH /api/v1/products/{sku}", a.patchProduct)
+
 	return a.recoverer(a.logging(mux))
 }
 
@@ -76,6 +80,8 @@ func writeError(w http.ResponseWriter, status int, code, msg string, details any
 func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 	var stale *catalog.StaleError
 	var st *catalog.StateError
+	var ve *catalog.ValidationError
+	var vc *catalog.VersionConflictError
 	switch {
 	case errors.Is(err, catalog.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "не найдено", nil)
@@ -83,6 +89,10 @@ func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusConflict, "import_stale", err.Error(), map[string]any{"conflicts": stale.Conflicts})
 	case errors.As(err, &st):
 		writeError(w, http.StatusConflict, "bad_status", err.Error(), map[string]string{"status": st.Status})
+	case errors.As(err, &ve):
+		writeError(w, http.StatusBadRequest, "validation", ve.Msg, nil)
+	case errors.As(err, &vc):
+		writeError(w, http.StatusConflict, "version_conflict", err.Error(), map[string]any{"current": toProductDTO(vc.Current)})
 	case errors.Is(err, catalog.ErrHashMismatch):
 		writeError(w, http.StatusConflict, "report_hash_mismatch", err.Error(), nil)
 	case errors.Is(err, catalog.ErrInvalidRows):
