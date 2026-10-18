@@ -34,10 +34,13 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/imports/{id}/items", a.importItems)
 	mux.HandleFunc("POST /api/v1/imports/{id}/apply", a.applyImport)
 	mux.HandleFunc("POST /api/v1/imports/{id}/cancel", a.cancelImport)
+	mux.HandleFunc("GET /api/v1/imports/{id}/events", a.importEvents)
+	mux.HandleFunc("GET /api/v1/imports/{id}/changes", a.importChanges)
 
 	mux.HandleFunc("GET /api/v1/products", a.listProducts)
 	mux.HandleFunc("GET /api/v1/products/{sku}", a.getProduct)
 	mux.HandleFunc("PATCH /api/v1/products/{sku}", a.patchProduct)
+	mux.HandleFunc("GET /api/v1/products/{sku}/history", a.productHistory)
 
 	return a.recoverer(a.logging(mux))
 }

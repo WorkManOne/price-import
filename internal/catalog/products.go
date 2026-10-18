@@ -206,6 +206,14 @@ func (s *Service) UpdateProduct(ctx context.Context, sku string, patch ProductPa
 	if err != nil {
 		return nil, err
 	}
+	act := "updated"
+	if cur.Active && !upd.Active {
+		act = "deactivated"
+	}
+	o, n := stateOf(cur), stateOf(upd)
+	if err := writeHistory(ctx, tx, nil, "manual", []histRow{{cur.SKU, act, &o, &n, upd.Version}}); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}

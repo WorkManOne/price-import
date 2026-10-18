@@ -102,3 +102,36 @@ func (a *API) patchProduct(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, toProductDTO(p))
 }
+
+type historyDTO struct {
+	ID           int64     `json:"id"`
+	SKU          string    `json:"sku"`
+	ImportID     *int64    `json:"importId,omitempty"`
+	Source       string    `json:"source"`
+	Action       string    `json:"action"`
+	Old          *stateDTO `json:"old,omitempty"`
+	New          *stateDTO `json:"new,omitempty"`
+	VersionAfter int64     `json:"versionAfter"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+func toHistoryDTOs(hs []catalog.HistoryEntry) []historyDTO {
+	out := make([]historyDTO, len(hs))
+	for i, h := range hs {
+		out[i] = historyDTO{h.ID, h.SKU, h.ImportID, h.Source, h.Action, toStateDTO(h.Old), toStateDTO(h.New), h.VersionAfter, h.CreatedAt}
+	}
+	return out
+}
+
+func (a *API) productHistory(w http.ResponseWriter, r *http.Request) {
+	limit, offset, ok := paging(w, r)
+	if !ok {
+		return
+	}
+	hs, err := a.svc.ProductHistory(r.Context(), r.PathValue("sku"), limit, offset)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"history": toHistoryDTOs(hs)})
+}

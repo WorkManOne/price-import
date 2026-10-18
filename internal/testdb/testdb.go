@@ -6,6 +6,8 @@ package testdb
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"math/rand/v2"
 	"os"
 	"testing"
@@ -45,6 +47,7 @@ func New(t testing.TB) *pgxpool.Pool {
 	if err != nil {
 		t.Fatal(err)
 	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil))) // логи миграций в тестах только мешают
 	if err := db.Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}

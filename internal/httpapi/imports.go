@@ -224,3 +224,34 @@ func (a *API) cancelImport(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, imp)
 }
+
+func (a *API) importEvents(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	evs, err := a.svc.Events(r.Context(), id)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": evs})
+}
+
+// importChanges - что импорт реально поменял (в отличие от items - что собирался)
+func (a *API) importChanges(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	limit, offset, ok := paging(w, r)
+	if !ok {
+		return
+	}
+	hs, err := a.svc.ImportChanges(r.Context(), id, limit, offset)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"changes": toHistoryDTOs(hs)})
+}

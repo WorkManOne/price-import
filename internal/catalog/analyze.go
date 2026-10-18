@@ -47,7 +47,18 @@ func (s *Service) Analyze(ctx context.Context, in AnalyzeInput) (*Import, error)
 		// файл кривой целиком - все равно пишем в историю что такое приходило
 		imp.Status = StatusRejected
 		imp.Error = fe.Error()
-		if err := s.insertImport(ctx, s.pool, imp); err != nil {
+		tx, err := s.pool.Begin(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback(ctx)
+		if err := s.insertImport(ctx, tx, imp); err != nil {
+			return nil, err
+		}
+		if err := addEvent(ctx, tx, imp.ID, "rejected", imp.Error, nil); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
 		return imp, &RejectedError{Import: imp, Reason: fe}
@@ -98,6 +109,12 @@ func (s *Service) Analyze(ctx context.Context, in AnalyzeInput) (*Import, error)
 		return nil, err
 	}
 	if err := insertItems(ctx, tx, imp.ID, res.Items); err != nil {
+		return nil, err
+	}
+	sm := res.Summary
+	msg := fmt.Sprintf("строк %d: новых %d, изменено %d, без изменений %d, битых %d, снять с продажи %d",
+		sm.Total, sm.New, sm.Changed, sm.Unchanged, sm.Invalid, sm.Missing)
+	if err := addEvent(ctx, tx, imp.ID, "analyzed", msg, nil); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {

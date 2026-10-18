@@ -104,6 +104,9 @@ func (s *Service) Apply(ctx context.Context, id int64, req ApplyRequest) (*Apply
 		if _, err := tx.Exec(ctx, `UPDATE imports SET status = 'stale', error = $2 WHERE id = $1`, id, msg); err != nil {
 			return nil, err
 		}
+		if err := addEvent(ctx, tx, id, "stale", msg, conflicts); err != nil {
+			return nil, err
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
@@ -130,6 +133,25 @@ func (s *Service) Apply(ctx context.Context, id int64, req ApplyRequest) (*Apply
 		return nil, err
 	}
 	if err := updateProducts(ctx, tx, upd); err != nil {
+		return nil, err
+	}
+
+	hist := make([]histRow, 0, len(ins)+len(upd))
+	for _, it := range ins {
+		hist = append(hist, histRow{it.SKU, "created", nil, it.New, 1})
+	}
+	for _, it := range upd {
+		act := "updated"
+		if it.Kind == diff.KindMissing {
+			act = "deactivated"
+		}
+		hist = append(hist, histRow{it.SKU, act, it.Old, it.New, it.BaseVersion + 1})
+	}
+	if err := writeHistory(ctx, tx, &id, "import", hist); err != nil {
+		return nil, err
+	}
+	msg := fmt.Sprintf("создано %d, обновлено %d, снято с продажи %d", res.Created, res.Updated, res.Deactivated)
+	if err := addEvent(ctx, tx, id, "applied", msg, nil); err != nil {
 		return nil, err
 	}
 
@@ -306,6 +328,9 @@ func (s *Service) Cancel(ctx context.Context, id int64) (*Import, error) {
 		return nil, &StateError{Status: imp.Status, Action: "отменить"}
 	}
 	if _, err := tx.Exec(ctx, `UPDATE imports SET status = 'canceled', canceled_at = now() WHERE id = $1`, id); err != nil {
+		return nil, err
+	}
+	if err := addEvent(ctx, tx, id, "canceled", "", nil); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
