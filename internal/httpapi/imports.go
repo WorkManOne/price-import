@@ -1,12 +1,14 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"mime"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/WorkManOne/price-import/internal/catalog"
 	"github.com/WorkManOne/price-import/internal/diff"
@@ -204,7 +206,11 @@ func (a *API) applyImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "no_report_hash", "reportHash обязателен - это подтверждение что отчет просмотрен", nil)
 		return
 	}
-	res, err := a.svc.Apply(r.Context(), id, req)
+	// если клиент отвалился посреди применения - все равно доводим транзакцию до конца,
+	// иначе он не узнает применилось или нет. повторный apply вернет alreadyApplied
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Minute)
+	defer cancel()
+	res, err := a.svc.Apply(ctx, id, req)
 	if err != nil {
 		a.serviceError(w, r, err)
 		return
