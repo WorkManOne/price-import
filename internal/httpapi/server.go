@@ -158,6 +158,9 @@ func (a *API) logging(next http.Handler) http.Handler {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: 200}
 		next.ServeHTTP(sw, r)
+		if r.URL.Path == "/healthz" {
+			return // докер дергает раз в 5 сек, в логах только мусор
+		}
 		a.log.Info("http", "method", r.Method, "path", r.URL.Path, "status", sw.status, "dur", time.Since(start).Round(time.Microsecond))
 	})
 }
