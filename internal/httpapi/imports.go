@@ -261,3 +261,19 @@ func (a *API) importChanges(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"changes": toHistoryDTOs(hs)})
 }
+
+func (a *API) revertImport(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	// как и apply - не бросаем на полпути если клиент ушел
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Minute)
+	defer cancel()
+	res, err := a.svc.Revert(ctx, id)
+	if err != nil {
+		a.serviceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}

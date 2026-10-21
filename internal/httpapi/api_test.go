@@ -228,3 +228,21 @@ func TestProductsAPI(t *testing.T) {
 		t.Fatal(code)
 	}
 }
+
+func TestRevertAPI(t *testing.T) {
+	srv := newServer(t)
+	m := upload(t, srv, "sku,name,price\nA-1,Чайник,10\n")
+	id := itoa(int(m["id"].(float64)))
+	do(t, "POST", srv.URL+"/api/v1/imports/"+id+"/apply", "application/json", applyBody(m["reportHash"].(string), false))
+	code, res := do(t, "POST", srv.URL+"/api/v1/imports/"+id+"/revert", "", nil)
+	if code != 200 || res["deleted"].(float64) != 1 {
+		t.Fatal(code, res)
+	}
+	if code, _ := do(t, "GET", srv.URL+"/api/v1/products/A-1", "", nil); code != 404 {
+		t.Fatal(code)
+	}
+	code, h := do(t, "GET", srv.URL+"/api/v1/products/A-1/history", "", nil)
+	if code != 200 || len(h["history"].([]any)) != 2 {
+		t.Fatal(code, h)
+	}
+}

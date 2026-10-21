@@ -59,6 +59,7 @@ type Import struct {
 	CreatedAt      time.Time    `json:"createdAt"`
 	AppliedAt      *time.Time   `json:"appliedAt,omitempty"`
 	CanceledAt     *time.Time   `json:"canceledAt,omitempty"`
+	RevertedAt     *time.Time   `json:"revertedAt,omitempty"`
 }
 
 func delimName(r rune) string {

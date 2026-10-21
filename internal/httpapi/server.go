@@ -34,6 +34,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/imports/{id}/items", a.importItems)
 	mux.HandleFunc("POST /api/v1/imports/{id}/apply", a.applyImport)
 	mux.HandleFunc("POST /api/v1/imports/{id}/cancel", a.cancelImport)
+	mux.HandleFunc("POST /api/v1/imports/{id}/revert", a.revertImport)
 	mux.HandleFunc("GET /api/v1/imports/{id}/events", a.importEvents)
 	mux.HandleFunc("GET /api/v1/imports/{id}/changes", a.importChanges)
 
@@ -84,12 +85,15 @@ func (a *API) serviceError(w http.ResponseWriter, r *http.Request, err error) {
 	var stale *catalog.StaleError
 	var st *catalog.StateError
 	var ve *catalog.ValidationError
+	var rc *catalog.RevertConflictError
 	var vc *catalog.VersionConflictError
 	switch {
 	case errors.Is(err, catalog.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "не найдено", nil)
 	case errors.As(err, &stale):
 		writeError(w, http.StatusConflict, "import_stale", err.Error(), map[string]any{"conflicts": stale.Conflicts})
+	case errors.As(err, &rc):
+		writeError(w, http.StatusConflict, "revert_conflict", err.Error(), map[string]any{"conflicts": rc.Conflicts})
 	case errors.As(err, &st):
 		writeError(w, http.StatusConflict, "bad_status", err.Error(), map[string]string{"status": st.Status})
 	case errors.As(err, &ve):

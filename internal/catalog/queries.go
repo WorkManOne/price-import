@@ -11,7 +11,7 @@ import (
 
 const importCols = `id, status, mode, filename, file_sha256, file_size, encoding, delimiter, columns,
 	ignored_columns, total_rows, new_count, changed_count, unchanged_count, invalid_count, missing_count,
-	warnings, report_hash, error, created_at, applied_at, canceled_at`
+	warnings, report_hash, error, created_at, applied_at, canceled_at, reverted_at`
 
 func scanImport(row pgx.Row) (*Import, error) {
 	var imp Import
@@ -20,7 +20,7 @@ func scanImport(row pgx.Row) (*Import, error) {
 	err := row.Scan(&imp.ID, &imp.Status, &imp.Mode, &imp.Filename, &imp.FileSHA256, &imp.FileSize,
 		&imp.Encoding, &imp.Delimiter, &imp.Columns, &imp.IgnoredColumns,
 		&s.Total, &s.New, &s.Changed, &s.Unchanged, &s.Invalid, &s.Missing,
-		&warn, &imp.ReportHash, &imp.Error, &imp.CreatedAt, &imp.AppliedAt, &imp.CanceledAt)
+		&warn, &imp.ReportHash, &imp.Error, &imp.CreatedAt, &imp.AppliedAt, &imp.CanceledAt, &imp.RevertedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
