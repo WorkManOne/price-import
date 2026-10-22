@@ -1,0 +1,499 @@
+openapi: 3.0.3
+info:
+  title: price-import
+  version: "1.0"
+  description: |
+    Импорт каталога из CSV с отчетом перед применением.
+
+    Порядок работы:
+    1. `POST /api/v1/imports` - загрузить файл. Каталог НЕ меняется, строится отчет.
+    2. `GET /api/v1/imports/{id}` и `/items` - посмотреть отчет (новые / измененные / некорректные / снимаемые).
+    3. `POST /api/v1/imports/{id}/apply` с `reportHash` из отчета - подтвердить и применить (одна транзакция).
+
+    Цены везде строкой с двумя знаками ("1299.90"), внутри хранятся в копейках.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: imports
+  - name: products
+
+paths:
+  /healthz:
+    get:
+      summary: Живой ли сервис и база
+      responses:
+        "200": { description: ok }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /api/v1/imports:
+    post:
+      tags: [imports]
+      summary: Загрузить CSV и получить отчет
+      description: |
+        Файл можно прислать как multipart/form-data (поле `file`) или просто телом запроса.
+        Файл разбирается и сравнивается с текущим каталогом, отчет сохраняется. Каталог не меняется.
+        Если файл не разбирается целиком (нет колонки sku, битые кавычки, неизвестная кодировка) -
+        422, но импорт все равно сохраняется со статусом `rejected`.
+      parameters:
+        - name: mode
+          in: query
+          schema: { type: string, enum: [partial, full], default: partial }
+          description: |
+            partial - трогаем только строки из файла.
+            full - файл это весь каталог: активные товары, которых нет в файле, снимаются с продажи (active=false).
+        - name: delimiter
+          in: query
+          schema: { type: string, enum: [auto, ",", ";", tab], default: auto }
+        - name: encoding
+          in: query
+          schema: { type: string, enum: [auto, utf-8, cp1251], default: auto }
+        - name: filename
+          in: query
+          schema: { type: string }
+          description: имя файла для истории (для multipart берется из файла)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+          text/csv:
+            schema: { type: string }
+      responses:
+        "201":
+          description: отчет готов, импорт в статусе analyzed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Import" }
+        "400": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "422":
+          description: файл отклонен целиком (code=file_rejected, details.importId)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      tags: [imports]
+      summary: Список импортов (свежие сверху)
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  imports:
+                    type: array
+                    items: { $ref: "#/components/schemas/Import" }
+
+  /api/v1/imports/{id}:
+    get:
+      tags: [imports]
+      summary: Сводка импорта
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Import" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/imports/{id}/items:
+    get:
+      tags: [imports]
+      summary: Строки отчета
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - name: kind
+          in: query
+          schema: { type: string, enum: [new, changed, unchanged, invalid, missing] }
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Item" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/imports/{id}/apply:
+    post:
+      tags: [imports]
+      summary: Подтвердить и применить импорт
+      description: |
+        Все изменения одной транзакцией. Перед записью каждый товар из отчета сверяется по версии с тем,
+        что было при анализе; если хоть один изменился - ничего не пишется, импорт становится `stale` (409).
+        Повторный вызов для уже примененного импорта ничего не делает и возвращает `alreadyApplied: true`.
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reportHash]
+              properties:
+                reportHash:
+                  type: string
+                  description: reportHash из отчета - подтверждение, что применяется именно просмотренный отчет
+                skipInvalid:
+                  type: boolean
+                  default: false
+                  description: обязательно true, если в отчете есть некорректные строки (они пропускаются)
+      responses:
+        "200":
+          description: применен (или уже был применен)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplyResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409":
+          description: |
+            import_stale - каталог поменялся после анализа (details.conflicts);
+            report_hash_mismatch - хэш не от этого отчета;
+            bad_status - импорт отменен/протух/откачен
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: invalid_rows_not_confirmed - есть некорректные строки, а skipInvalid не передан
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/imports/{id}/cancel:
+    post:
+      tags: [imports]
+      summary: Отменить непримененный импорт
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: ok (повторная отмена тоже 200)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Import" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /api/v1/imports/{id}/revert:
+    post:
+      tags: [imports]
+      summary: Откатить примененный импорт
+      description: |
+        Возвращает товарам значения до импорта, созданные импортом товары удаляет (история остается).
+        Только если ни один затронутый товар не менялся после импорта, иначе 409 revert_conflict.
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  import: { $ref: "#/components/schemas/Import" }
+                  alreadyReverted: { type: boolean }
+                  restored: { type: integer }
+                  deleted: { type: integer }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /api/v1/imports/{id}/events:
+    get:
+      tags: [imports]
+      summary: Журнал импорта (analyzed, applied, stale, canceled, reverted, rejected)
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/Event" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/imports/{id}/changes:
+    get:
+      tags: [imports]
+      summary: Что импорт реально изменил в каталоге
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  changes:
+                    type: array
+                    items: { $ref: "#/components/schemas/HistoryEntry" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/products:
+    get:
+      tags: [products]
+      summary: Каталог
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+          description: подстрока артикула или названия (без учета регистра)
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: active
+          in: query
+          schema: { type: boolean }
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  products:
+                    type: array
+                    items: { $ref: "#/components/schemas/Product" }
+
+  /api/v1/products/{sku}:
+    get:
+      tags: [products]
+      summary: Товар
+      parameters: [{ $ref: "#/components/parameters/sku" }]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [products]
+      summary: Ручная правка товара
+      description: |
+        Оптимистичная блокировка: version обязателен и должен совпадать с текущим, иначе 409 version_conflict
+        (в details.current - актуальный товар). Любая правка увеличивает версию, поэтому отчеты импортов,
+        построенные раньше, становятся устаревшими для этого товара.
+      parameters: [{ $ref: "#/components/parameters/sku" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer }
+                name: { type: string }
+                category: { type: string }
+                price:
+                  description: строка "199.90" или число 199.90 (разбирается как текст, без float)
+                  oneOf:
+                    - { type: string }
+                    - { type: number }
+                stock: { type: integer, minimum: 0 }
+                active: { type: boolean }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /api/v1/products/{sku}/history:
+    get:
+      tags: [products]
+      summary: История изменений товара (свежие сверху)
+      parameters:
+        - $ref: "#/components/parameters/sku"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  history:
+                    type: array
+                    items: { $ref: "#/components/schemas/HistoryEntry" }
+        "404": { $ref: "#/components/responses/Error" }
+
+components:
+  parameters:
+    id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    sku:
+      name: sku
+      in: path
+      required: true
+      schema: { type: string }
+      description: регистр не важен, артикулы хранятся в верхнем регистре
+    limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+    offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+
+  responses:
+    Error:
+      description: ошибка
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: import_stale }
+            message: { type: string }
+            details: { type: object }
+
+    Summary:
+      type: object
+      properties:
+        total: { type: integer, description: строк в файле без пустых }
+        new: { type: integer }
+        changed: { type: integer }
+        unchanged: { type: integer }
+        invalid: { type: integer }
+        missing: { type: integer, description: только full - будут сняты с продажи }
+        warnings: { type: array, items: { type: string } }
+
+    Import:
+      type: object
+      properties:
+        id: { type: integer }
+        status: { type: string, enum: [rejected, analyzed, applied, stale, canceled, reverted] }
+        mode: { type: string, enum: [partial, full] }
+        filename: { type: string }
+        fileSha256: { type: string }
+        fileSize: { type: integer }
+        encoding: { type: string }
+        delimiter: { type: string }
+        columns: { type: array, items: { type: string } }
+        ignoredColumns: { type: array, items: { type: string } }
+        summary: { $ref: "#/components/schemas/Summary" }
+        reportHash: { type: string }
+        error: { type: string }
+        createdAt: { type: string, format: date-time }
+        appliedAt: { type: string, format: date-time }
+        canceledAt: { type: string, format: date-time }
+        revertedAt: { type: string, format: date-time }
+
+    State:
+      type: object
+      properties:
+        name: { type: string }
+        category: { type: string }
+        price: { type: string, example: "1299.90" }
+        stock: { type: integer }
+        active: { type: boolean }
+
+    Item:
+      type: object
+      properties:
+        line: { type: integer, description: номер строки в файле (заголовок = 1), нет у missing }
+        kind: { type: string, enum: [new, changed, unchanged, invalid, missing] }
+        sku: { type: string }
+        baseVersion: { type: integer, description: версия товара на момент анализа, 0 - товара не было }
+        old: { $ref: "#/components/schemas/State" }
+        new: { $ref: "#/components/schemas/State" }
+        changes:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              old: { type: string }
+              new: { type: string }
+        errors: { type: array, items: { type: string } }
+        warnings: { type: array, items: { type: string } }
+        raw: { type: array, items: { type: string }, description: значения строки как в файле }
+
+    ApplyResult:
+      type: object
+      properties:
+        import: { $ref: "#/components/schemas/Import" }
+        alreadyApplied: { type: boolean }
+        created: { type: integer }
+        updated: { type: integer }
+        deactivated: { type: integer }
+
+    Event:
+      type: object
+      properties:
+        id: { type: integer }
+        importId: { type: integer }
+        type: { type: string }
+        message: { type: string }
+        details: { type: object }
+        createdAt: { type: string, format: date-time }
+
+    Product:
+      type: object
+      properties:
+        sku: { type: string }
+        name: { type: string }
+        category: { type: string }
+        price: { type: string, example: "1299.90" }
+        stock: { type: integer }
+        active: { type: boolean }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    HistoryEntry:
+      type: object
+      properties:
+        id: { type: integer }
+        sku: { type: string }
+        importId: { type: integer }
+        source: { type: string, enum: [import, manual, revert] }
+        action: { type: string, enum: [created, updated, deactivated, deleted] }
+        old: { $ref: "#/components/schemas/State" }
+        new: { $ref: "#/components/schemas/State" }
+        versionAfter: { type: integer, description: 0 - товар удален откатом }
+        createdAt: { type: string, format: date-time }

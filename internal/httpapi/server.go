@@ -27,6 +27,8 @@ func New(svc *catalog.Service, log *slog.Logger) *API {
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
+	mux.HandleFunc("GET /openapi.yaml", a.openapi)
+	mux.HandleFunc("GET /docs", a.docs)
 
 	mux.HandleFunc("POST /api/v1/imports", a.createImport)
 	mux.HandleFunc("GET /api/v1/imports", a.listImports)
