@@ -4,12 +4,13 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server \
+ && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pricectl ./cmd/pricectl
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
-COPY --from=build /out/server /usr/local/bin/server
+COPY --from=build /out/server /out/pricectl /usr/local/bin/
 EXPOSE 8080
 USER nobody
 ENTRYPOINT ["server"]
