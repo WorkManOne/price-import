@@ -1,7 +1,7 @@
 # локальные команды. для запуска нужен только docker, make - для удобства
 TEST_DB ?= postgres://prices:prices@localhost:5433/prices?sslmode=disable
 
-.PHONY: up down logs test test-unit test-docker fmt vet
+.PHONY: up down logs test test-unit test-docker fmt vet demo
 
 up:
 	docker compose up --build -d
@@ -31,3 +31,9 @@ fmt:
 
 vet:
 	go vet ./...
+
+# демо с нуля. ВНИМАНИЕ: сносит базу (down -v)
+demo:
+	docker compose down -v
+	docker compose up -d --build --wait
+	./scripts/demo.sh

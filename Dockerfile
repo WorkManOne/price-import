@@ -11,6 +11,8 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=build /out/server /out/pricectl /usr/local/bin/
+# примеры для демо: docker compose exec app pricectl upload examples/01_initial.csv
+COPY examples /app/examples
 EXPOSE 8080
 USER nobody
 ENTRYPOINT ["server"]
