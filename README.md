@@ -40,6 +40,9 @@ docker compose down -v && docker compose up -d --build --wait && ./scripts/demo.
 ```
 
 (или `make demo`). Скрипт ждет Enter между шагами, `DEMO_FAST=1` — без пауз.
+Скрипты на bash: на Windows запускать из Git Bash или WSL (сам сервис и тесты от этого не зависят).
+
+Проверка гонки через два экземпляра сервиса: `./scripts/two_instances.sh` (см. раздел 8).
 
 Если установлен Go:
 

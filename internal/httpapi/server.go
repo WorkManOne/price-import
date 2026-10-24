@@ -147,7 +147,7 @@ func paging(w http.ResponseWriter, r *http.Request) (limit, offset int, ok bool)
 	return limit, offset, true
 }
 
-// --- middleware ---
+// --- обертки (логи, паники) ---
 
 type statusWriter struct {
 	http.ResponseWriter

@@ -129,7 +129,7 @@ func TestApplyStaleAfterManualChange(t *testing.T) {
 func TestApplyStaleUnchangedRowCounts(t *testing.T) {
 	s, pool := newSvc(t)
 	seed(t, pool, []any{"A-1", "Чайник", "", 10000, 5})
-	imp := analyze(t, s, "sku,price\nA-1,100\n", diff.ModePartial) // unchanged
+	imp := analyze(t, s, "sku,price\nA-1,100\n", diff.ModePartial) // без изменений
 	pool.Exec(ctx, `UPDATE products SET price_kopecks = 12000, version = version + 1 WHERE sku = 'A-1'`)
 	var se *StaleError
 	if _, err := s.Apply(ctx, imp.ID, ApplyRequest{ReportHash: imp.ReportHash}); !errors.As(err, &se) {
