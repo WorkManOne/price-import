@@ -44,24 +44,7 @@ func (s *Service) Analyze(ctx context.Context, in AnalyzeInput) (*Import, error)
 		if !errors.As(err, &fe) {
 			return nil, err
 		}
-		// файл кривой целиком - все равно пишем в историю что такое приходило
-		imp.Status = StatusRejected
-		imp.Error = fe.Error()
-		tx, err := s.pool.Begin(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defer tx.Rollback(ctx)
-		if err := s.insertImport(ctx, tx, imp); err != nil {
-			return nil, err
-		}
-		if err := addEvent(ctx, tx, imp.ID, "rejected", imp.Error, nil); err != nil {
-			return nil, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, err
-		}
-		return imp, &RejectedError{Import: imp, Reason: fe}
+		return s.reject(ctx, imp, fe)
 	}
 	imp.Encoding = f.Encoding
 	imp.Delimiter = delimName(f.Delimiter)
@@ -69,6 +52,12 @@ func (s *Service) Analyze(ctx context.Context, in AnalyzeInput) (*Import, error)
 		imp.Columns = append(imp.Columns, string(c))
 	}
 	imp.IgnoredColumns = f.Ignored
+	if in.Mode == diff.ModeFull && !hasValidRow(f) {
+		// пустой (или целиком битый) файл в full режиме = "снять с продажи вообще все".
+		// предупреждения тут мало, такое не принимаем вообще
+		return s.reject(ctx, imp, &pricecsv.FileError{
+			Msg: "в полном импорте нет ни одной корректной строки - он снял бы с продажи весь каталог"})
+	}
 
 	// repeatable read: весь каталог читаем одним снимком, иначе при параллельном
 	// применении другого импорта половина отчета будет по старым данным, половина по новым
@@ -121,6 +110,36 @@ func (s *Service) Analyze(ctx context.Context, in AnalyzeInput) (*Import, error)
 		return nil, err
 	}
 	return imp, nil
+}
+
+// reject - файл не принят целиком, но запись об импорте все равно оставляем (для истории)
+func (s *Service) reject(ctx context.Context, imp *Import, reason *pricecsv.FileError) (*Import, error) {
+	imp.Status = StatusRejected
+	imp.Error = reason.Error()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if err := s.insertImport(ctx, tx, imp); err != nil {
+		return nil, err
+	}
+	if err := addEvent(ctx, tx, imp.ID, "rejected", imp.Error, nil); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return imp, &RejectedError{Import: imp, Reason: reason}
+}
+
+func hasValidRow(f *pricecsv.File) bool {
+	for i := range f.Rows {
+		if f.Rows[i].Valid() {
+			return true
+		}
+	}
+	return false
 }
 
 type querier interface {

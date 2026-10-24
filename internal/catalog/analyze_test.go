@@ -96,3 +96,19 @@ func TestListImports(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFullModeEmptyFileRejected(t *testing.T) {
+	s, pool := newSvc(t)
+	seed(t, pool, []any{"A-1", "Чайник", "", 10000, 5})
+	for _, csv := range []string{"sku,name,price\n", "sku,name,price\nA-1,Чайник,abc\n"} {
+		_, err := s.Analyze(ctx, AnalyzeInput{Data: []byte(csv), Mode: diff.ModeFull})
+		var re *RejectedError
+		if !errors.As(err, &re) {
+			t.Fatalf("%q: %v", csv, err)
+		}
+	}
+	// а в partial пустой файл - просто пустой отчет
+	if _, err := s.Analyze(ctx, AnalyzeInput{Data: []byte("sku,name,price\n")}); err != nil {
+		t.Fatal(err)
+	}
+}

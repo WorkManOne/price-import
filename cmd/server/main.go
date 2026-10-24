@@ -40,6 +40,9 @@ func run(log *slog.Logger) error {
 	}
 
 	svc := catalog.New(pool)
+	if n, err := strconv.Atoi(os.Getenv("MAX_ROWS")); err == nil && n > 0 {
+		svc.MaxRows = n
+	}
 	api := httpapi.New(svc, log)
 	if mb, err := strconv.Atoi(os.Getenv("MAX_UPLOAD_MB")); err == nil && mb > 0 {
 		api.MaxUpload = int64(mb) << 20
