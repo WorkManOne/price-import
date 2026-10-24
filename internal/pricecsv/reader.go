@@ -49,6 +49,7 @@ type File struct {
 	Ignored   []string // незнакомые колонки, их просто не трогаем
 	Rows      []Row
 	hm        *headerMap
+	lines     []string // режем файл на строки только если понадобилось (см lazyRecord)
 }
 
 func (f *File) Has(c Column) bool {
@@ -100,10 +101,19 @@ func Parse(r io.Reader, opt Options) (*File, error) {
 		if err != nil {
 			var pe *csv.ParseError
 			if errors.As(err, &pe) && errors.Is(pe.Err, csv.ErrBareQuote) {
-				// кавычка внутри значения без экранирования, типа: Монитор 27" - строку не разобрать,
-				// но остальной файл читается нормально, так что это просто битая строка
-				f.Rows = append(f.Rows, Row{Line: pe.StartLine, Errors: []string{
-					fmt.Sprintf("кавычка посреди значения (колонка %d): такое значение надо целиком брать в кавычки, а внутренние кавычки удваивать", pe.Column)}})
+				// кавычка внутри значения без экранирования, типа: Монитор 27" - строку строго не разобрать,
+				// но остальной файл читается нормально, так что это просто битая строка.
+				// разбираем ее еще раз "лениво" чтобы в отчете был виден артикул и значения
+				row := Row{Line: pe.StartLine}
+				if rec := f.lazyRecord(text, pe.StartLine); rec != nil {
+					row.Raw = rec
+					if i := hm.idx[ColSKU]; i < len(rec) {
+						row.SKU = NormSKU(rec[i])
+					}
+				}
+				row.addErr(`кавычка внутри значения, которое не взято в кавычки (например Монитор 27"): ` +
+					`такое значение надо целиком брать в кавычки, а внутренние кавычки удваивать: "Монитор 27"""`)
+				f.Rows = append(f.Rows, row)
 				continue
 			}
 			return nil, csvFileErr(err)
@@ -119,6 +129,25 @@ func Parse(r io.Reader, opt Options) (*File, error) {
 	}
 	markDuplicates(f.Rows)
 	return f, nil
+}
+
+// lazyRecord - строка n файла, разобранная с LazyQuotes. только для отчета по битым строкам
+func (f *File) lazyRecord(text string, n int) []string {
+	if f.lines == nil {
+		f.lines = strings.Split(text, "\n")
+	}
+	if n < 1 || n > len(f.lines) {
+		return nil
+	}
+	r := csv.NewReader(strings.NewReader(strings.TrimRight(f.lines[n-1], "\r")))
+	r.Comma = f.Delimiter
+	r.LazyQuotes = true
+	r.FieldsPerRecord = -1
+	rec, err := r.Read()
+	if err != nil {
+		return nil
+	}
+	return rec
 }
 
 func csvFileErr(err error) error {

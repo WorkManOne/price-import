@@ -120,6 +120,10 @@ func TestBareQuoteIsRowError(t *testing.T) {
 	if f.Rows[0].Valid() || f.Rows[0].Line != 2 {
 		t.Fatalf("%+v", f.Rows[0])
 	}
+	// артикул и значения все равно вытащили, чтоб в отчете было понятно что за строка
+	if f.Rows[0].SKU != "M-1" || len(f.Rows[0].Raw) != 3 || f.Rows[0].Raw[1] != `Монитор 27"` {
+		t.Fatalf("%+v", f.Rows[0])
+	}
 	if !f.Rows[1].Valid() || f.Rows[1].SKU != "M-2" {
 		t.Fatalf("%+v", f.Rows[1])
 	}
@@ -138,5 +142,13 @@ func TestMaxRows(t *testing.T) {
 	var fe *FileError
 	if !errors.As(err, &fe) {
 		t.Fatal(err)
+	}
+}
+
+func TestBareQuoteDuplicateStillCaught(t *testing.T) {
+	// битая строка с тем же артикулом что и нормальная - это тоже дубль
+	f := parse(t, "sku,name,price\nm-1,Монитор 27\",100\nm-1,Монитор,5\n")
+	if f.Rows[1].Valid() {
+		t.Fatalf("%+v", f.Rows[1])
 	}
 }

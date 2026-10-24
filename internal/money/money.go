@@ -45,11 +45,11 @@ func Parse(s string) (Kopecks, error) {
 
 	intPart, frac, hasDot := strings.Cut(s, ".")
 	if intPart == "" || !digitsOnly(intPart) || (hasDot && !digitsOnly(frac)) {
-		return 0, fmt.Errorf("%w: %q", ErrFormat, s)
+		return 0, ErrFormat // исходное значение покажет вызывающий, тут оно уже без пробелов
 	}
 	if hasDot && frac == "" {
 		// "100." - ну такое, тоже считаем ошибкой
-		return 0, fmt.Errorf("%w: %q", ErrFormat, s)
+		return 0, ErrFormat
 	}
 	if len(frac) > 2 {
 		// 12.500 ок, 12.345 нет - копейки дробными не бывают
@@ -70,7 +70,7 @@ func Parse(s string) (Kopecks, error) {
 	}
 	rub, err := strconv.ParseInt(intPart, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("%w: %q", ErrFormat, s)
+		return 0, ErrFormat
 	}
 	kop, _ := strconv.ParseInt(frac, 10, 64)
 	v := Kopecks(rub*100 + kop)

@@ -157,3 +157,14 @@ func TestParseMode(t *testing.T) {
 		t.Fatal("ждали ошибку")
 	}
 }
+
+func TestFullModeBrokenQuoteRowNotDeactivated(t *testing.T) {
+	// строка A-4 битая из-за кавычки - товар все равно "есть в файле", снимать его нельзя
+	f := file(t, "sku,name,price\nA-1,Чайник,100\nA-2,Утюг,200\nA-4,Тостер 2\",50\n")
+	r := Build(f, catalog(), ModeFull)
+	for _, it := range r.Items {
+		if it.Kind == KindMissing {
+			t.Fatalf("снимаем %s, а не должны", it.SKU)
+		}
+	}
+}
