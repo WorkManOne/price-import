@@ -54,6 +54,16 @@ go run ./cmd/pricectl upload examples/01_initial.csv
 
 Переменные сервера: `DATABASE_URL`, `HTTP_ADDR` (`:8080`), `MAX_UPLOAD_MB` (20), `MAX_ROWS` (100000).
 
+Если Docker Hub недоступен (`TLS handshake timeout` при сборке), базовые образы можно взять с зеркала
+и пересобрать:
+
+```bash
+for img in golang:1.25 alpine:3.20 postgres:16-alpine; do
+  docker pull mirror.gcr.io/library/$img && docker tag mirror.gcr.io/library/$img $img
+done
+docker compose up --build
+```
+
 ---
 
 ## 2. Как пользоваться
